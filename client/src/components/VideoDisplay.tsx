@@ -2,8 +2,8 @@ import { Box, Paper, Typography } from '@mui/material';
 import { useRef } from 'react';
 
 interface VideoDisplayProps {
-  localVideoRef?: React.RefObject<HTMLVideoElement>;
-  remoteVideoRef?: React.RefObject<HTMLVideoElement>;
+  localVideoRef?: React.RefObject<HTMLVideoElement | null>;
+  remoteVideoRef?: React.RefObject<HTMLVideoElement | null>;
   isLocalVideoEnabled?: boolean;
   isRemoteConnected?: boolean;
 }

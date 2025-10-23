@@ -1,8 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { Box, Container } from '@mui/material';
+import { Box, Container, IconButton, Tooltip } from '@mui/material';
+import { Chat as ChatIcon } from '@mui/icons-material';
 import VideoDisplay from '../components/VideoDisplay';
 import CallControls from '../components/CallControls';
 import ParticipantInfo from '../components/ParticipantInfo';
+import MessageDrawer from '../components/MessageDrawer';
+import { useMessages } from '../hooks/useMessages';
 import { useNavigate } from 'react-router-dom';
 
 const VideoCall: React.FC = () => {
@@ -17,6 +20,13 @@ const VideoCall: React.FC = () => {
   const [isCameraEnabled, setIsCameraEnabled] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isRemoteConnected, setIsRemoteConnected] = useState(false);
+  const [isMessageDrawerOpen, setIsMessageDrawerOpen] = useState(false);
+
+  // Message functionality
+  const { messages, sendMessage } = useMessages({ 
+    currentUser: 'You', // In a real app, this would come from user context
+    room: 'video-call-room' 
+  });
 
   // Call duration timer
   const [duration, setDuration] = useState('00:00');
@@ -67,6 +77,14 @@ const VideoCall: React.FC = () => {
     navigate('/');
   };
 
+  const handleToggleMessageDrawer = () => {
+    setIsMessageDrawerOpen(!isMessageDrawerOpen);
+  };
+
+  const handleSendMessage = (message: string) => {
+    sendMessage(message);
+  };
+
   // Simulate remote connection after 2 seconds (for demo purposes)
   // Remove this in production and use actual WebRTC connection events
   useEffect(() => {
@@ -96,7 +114,6 @@ const VideoCall: React.FC = () => {
           duration={duration}
         />
 
-        {/* Video Display Area */}
         <Box
           sx={{
             position: 'relative',
@@ -109,10 +126,30 @@ const VideoCall: React.FC = () => {
             isLocalVideoEnabled={isCameraEnabled}
             isRemoteConnected={isRemoteConnected}
           />
+          
+          {/* Chat Button */}
+          <Tooltip title="Open Messages">
+            <IconButton
+              onClick={handleToggleMessageDrawer}
+              sx={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                color: 'white',
+                '&:hover': {
+                  backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                },
+                zIndex: 10,
+              }}
+              size="large"
+            >
+              <ChatIcon />
+            </IconButton>
+          </Tooltip>
         </Box>
       </Container>
 
-      {/* Call Controls */}
       <CallControls
         isMicEnabled={isMicEnabled}
         isCameraEnabled={isCameraEnabled}
@@ -121,6 +158,15 @@ const VideoCall: React.FC = () => {
         onToggleCamera={handleToggleCamera}
         onToggleScreenShare={handleToggleScreenShare}
         onEndCall={handleEndCall}
+      />
+
+      {/* Message Drawer */}
+      <MessageDrawer
+        isOpen={isMessageDrawerOpen}
+        onClose={() => setIsMessageDrawerOpen(false)}
+        messages={messages}
+        onSendMessage={handleSendMessage}
+        currentUser="You"
       />
     </Box>
   );

@@ -42,3 +42,20 @@ export interface LayoutProps {
 export interface PageProps {
   className?: string;
 }
+
+// Message types for chat functionality
+export interface ChatMessage {
+  id: string;
+  message: string;
+  user: string;
+  timestamp: number;
+  isOwn: boolean;
+}
+
+export interface MessageDrawerProps {
+  isOpen: boolean;
+  onClose: () => void;
+  messages: ChatMessage[];
+  onSendMessage: (message: string) => void;
+  currentUser: string;
+}
