@@ -2,59 +2,21 @@ import express from 'express';
 import { readFileSync } from 'fs';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
-import {createServer} from 'http'
-
-interface RTCSessionDescription {
-  type: 'offer' | 'answer' | 'pranswer' | 'rollback';
-  sdp: string;
-}
-
-interface RTCIceCandidate {
-  candidate: string;
-  sdpMLineIndex?: number;
-  sdpMid?: string;
-}
-
-interface ServerToClientEvents {
-  message: (data: { message: string; timestamp: number; user: string }) => void;
-  userJoined: (data: { user: string; timestamp: number }) => void;
-  userLeft: (data: { user: string; timestamp: number }) => void;
-  offer: (data: { offer: RTCSessionDescription; from: string }) => void;
-  answer: (data: { answer: RTCSessionDescription; from: string }) => void;
-  iceCandidate: (data: { candidate: RTCIceCandidate; from: string }) => void;
-}
-
-interface ClientToServerEvents {
-  message: (data: { message: string; user: string }) => void;
-  joinRoom: (data: { room: string; user: string }) => void;
-  leaveRoom: (data: { room: string; user: string }) => void;
-  offer: (data: { offer: RTCSessionDescription; to: string; room: string }) => void;
-  answer: (data: { answer: RTCSessionDescription; to: string; room: string }) => void;
-  iceCandidate: (data: { candidate: RTCIceCandidate; to: string; room: string }) => void;
-}
-
-interface InterServerEvents {
-  ping: () => void;
-}
-
-interface SocketData {
-  user: string;
-  room: string;
-}
+import { createServer } from 'http'
 
 const app = express();
-const PORT =2025;
+const PORT = 2025;
 
 app.use(cors({
-  origin: process.env.CLIENT_URL || "http://localhost:5173",
+  origin: ["https://localhost:5173", "http://localhost:5173", "https://192.168.1.67:5173", "http://192.168.1.67:5173"],
   credentials: true
 }));
 
 app.use(express.json());
 
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+  res.json({
+    status: 'OK',
     timestamp: new Date().toISOString(),
     message: 'Socket.IO server is running'
   });
@@ -66,137 +28,117 @@ const io = new SocketIOServer(
   httpsServer,
   {
     cors: {
-      origin: process.env.CLIENT_URL || "http://localhost:5173",
+      origin: ["https://localhost:5173", "http://localhost:5173", "https://192.168.1.67:5173", "http://192.168.1.67:5173"],
       methods: ["GET", "POST"],
       credentials: true
     }
   }
 );
 
-const connectedUsers = new Map<string, { socketId: string; room: string; user: string }>();
-const rooms = new Map<string, Set<string>>();
 
+const connectedUsers = new Map<string, string>();
+let offers: Room[] = [];
 io.on('connection', (socket) => {
-  console.log(`User connected: ${socket.id}`);
+  const userId = socket.handshake.auth.user;
+
+  console.log(`socket client connected: ${socket.id}`);
+  connectedUsers.set(userId, socket.id);
 
   socket.on('cts-message', (data) => {
-    
-    console.log("message from client", data);
+    const { message, user } = data;
+
+    socket.emit('stc-message', {
+      message,
+      user,
+      timestamp: Date.now()
+    });
   });
 
-  socket.on('joinRoom', (data) => {
-    const { room, user } = data;
-    
-    if (socket.data.room) {
-      socket.leave(socket.data.room);
-      const roomUsers = rooms.get(socket.data.room);
-      if (roomUsers) {
-        roomUsers.delete(socket.id);
-        if (roomUsers.size === 0) {
-          rooms.delete(socket.data.room);
+  socket.on('cts-new-offer', (data) => {
+    const { offer, user } = data;
+    offers = offers.filter(item => item.offererUserId !== user);
+    const room: Room = {
+      offererUserId: user,
+      offer,
+      offererIceCandidates: [],
+      answererUserId: null,
+      answer: null,
+      answererIceCandidates: []
+    };
+
+    offers.push(room);
+
+    io.emit('stc-new-offer', { offer: room });
+  });
+
+  socket.on('cts-answer-offer', (data, callback) => {
+    const {
+
+    } = data;
+  })
+
+  socket.on('cts-ice-candidate', (data) => {
+    const {
+      ICECandidate,
+      username,
+      isOfferer
+    } = data;
+
+    if (isOfferer) {
+      const currentOffer = offers.find(off => off.offererUserId === username);
+      if (currentOffer) {
+        currentOffer.offererIceCandidates.push(ICECandidate);
+
+        if (currentOffer.answererUserId) {
+          const answererSocketId = connectedUsers.get(currentOffer.answererUserId);
+
+          if (answererSocketId) {
+            io.to(answererSocketId).emit('stc-ice-candidate', { ICECandidate })
+          }
         }
       }
-    }
+    } else {
+      const targetedOffer = offers.find(off => off.answererUserId === username);
+      if (targetedOffer) {
 
-    socket.join(room);
-    socket.data.room = room;
-    socket.data.user = user;
-
-    connectedUsers.set(socket.id, { socketId: socket.id, room, user });
-    
-    if (!rooms.has(room)) {
-      rooms.set(room, new Set());
-    }
-    rooms.get(room)!.add(socket.id);
-
-    socket.to(room).emit('userJoined', {
-      user,
-      timestamp: Date.now()
-    });
-
-    console.log(`User ${user} joined room ${room}`);
-  });
-
-  socket.on('leaveRoom', (data) => {
-    const { room, user } = data;
-    
-    socket.leave(room);
-    
-    connectedUsers.delete(socket.id);
-    const roomUsers = rooms.get(room);
-    if (roomUsers) {
-      roomUsers.delete(socket.id);
-      if (roomUsers.size === 0) {
-        rooms.delete(room);
       }
     }
-
-    socket.to(room).emit('userLeft', {
-      user,
-      timestamp: Date.now()
-    });
-
-    console.log(`User ${user} left room ${room}`);
+    io.emit('stc-ice-candidate', { ICECandidate, username, isOfferer });
   });
 
-  socket.on('message', (data) => {
-    const { message, user } = data;
-    const room = socket.data.room;
-    
-    if (room) {
-      socket.to(room).emit('message', {
-        message,
-        user,
-        timestamp: Date.now()
-      });
+
+  socket.on('cts-answer-offer', (data, callback) => {
+    const { room }: { room: Room } = data;
+    const { offererUserId } = room;
+
+    const offererSocketId = connectedUsers.get(offererUserId);
+
+    if (!offererSocketId) {
+      console.log("No matching socket")
+      return;
     }
-  });
 
-  socket.on('offer', (data) => {
-    const { offer, to, room } = data;
-    socket.to(to).emit('offer', {
-      offer,
-      from: socket.data.user || socket.id
-    });
-  });
+    const offerWhichIsAnswered = offers.find(off => off.offererUserId === offererUserId);
+    if (!offerWhichIsAnswered) {
+      console.log("No offer found")
+      return;
+    }
 
-  socket.on('answer', (data) => {
-    const { answer, to, room } = data;
-    socket.to(to).emit('answer', {
-      answer,
-      from: socket.data.user || socket.id
-    });
-  });
+    callback({
+      offererICECandidates: offerWhichIsAnswered.offererIceCandidates,
+    })
 
-  socket.on('iceCandidate', (data) => {
-    const { candidate, to, room } = data;
-    socket.to(to).emit('iceCandidate', {
-      candidate,
-      from: socket.data.user || socket.id
+    offerWhichIsAnswered.answererUserId = userId;
+    offerWhichIsAnswered.answer = room.answer;
+
+    socket.to(offererSocketId).emit('stc-answer-to-offerer', {
+      updatedOffer: offerWhichIsAnswered,
     });
   });
 
   socket.on('disconnect', () => {
-    const userData = connectedUsers.get(socket.id);
-    if (userData) {
-      const { room, user } = userData;
-      
-      socket.to(room).emit('userLeft', {
-        user,
-        timestamp: Date.now()
-      });
-
-      connectedUsers.delete(socket.id);
-      const roomUsers = rooms.get(room);
-      if (roomUsers) {
-        roomUsers.delete(socket.id);
-        if (roomUsers.size === 0) {
-          rooms.delete(room);
-        }
-      }
-
-      console.log(`User ${user} disconnected from room ${room}`);
-    }
+    connectedUsers.delete(socket.handshake.auth.user);
+    offers = offers.filter(item => item.offererUserId !== socket.handshake.auth.user);
   });
 });
 

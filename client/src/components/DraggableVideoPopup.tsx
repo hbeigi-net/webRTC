@@ -133,6 +133,7 @@ const DraggableVideoPopup = ({ videoRef, isVisible, onClose, title }: DraggableV
           objectFit: 'cover',
           transform: 'scaleX(-1)' // Mirror the camera
         }}
+        muted={true}
       />
 
       {/* Resize Handle */}

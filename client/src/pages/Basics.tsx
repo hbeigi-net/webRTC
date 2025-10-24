@@ -3,6 +3,7 @@ import {
   Paper,
   IconButton,
   Tooltip,
+  Button,
 } from '@mui/material';
 import { Chat as ChatIcon } from '@mui/icons-material';
 import { useRef, useState, useCallback, useEffect } from 'react';
@@ -15,7 +16,21 @@ import DraggableVideoPopup from '../components/DraggableVideoPopup';
 import DeviceStatus from '../components/DeviceStatus';
 import MessageDrawer from '../components/MessageDrawer';
 import '../styles/media-video.css';
-import socketClient from '../socketstuff/socket';
+
+import 'webrtc-adapter'; // for cross-browser compatibility with WebRTC
+
+import socketClient, { user } from '../socketstuff/socket';
+
+const peerConfiguration = {
+  iceServers: [
+    {
+      urls: [
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302'
+      ]
+    }
+  ]
+}
 
 const updateVideoElement = (videoRef: React.RefObject<HTMLVideoElement>, stream: MediaStream | null) => {
   if (videoRef.current) {
@@ -38,6 +53,17 @@ const removeTracksFromStream = (streamRef: RefObject<MediaStream | null>, tracks
   }
 }
 
+
+type Room = {
+  offererUserId: string;
+  offer: RTCSessionDescriptionInit;
+  offererIceCandidates: RTCIceCandidate[];
+  answererUserId: string | null;
+  answer: RTCSessionDescriptionInit | null;
+  answererIceCandidates: RTCIceCandidate[];
+}
+
+
 const Basics = () => {
   const [videoFrameRateConstraints, setVideoFrameRateConstraints] = useState({ min: 0, max: 30 })
   const [videoRefreshRate, setVideoRefreshRate] = useState(() => {
@@ -48,20 +74,31 @@ const Basics = () => {
   const [screenShareAudio, setScreenShareAudio] = useState(false)
   const [screenShareWidth, setScreenShareWidth] = useState(1000)
   const [screenShareHeight, setScreenShareHeight] = useState(600)
+
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+
   const [isCameraSharing, setIsCameraSharing] = useState(false);
+  const [isVideoPopupOpen, setIsVideoPopupOpen] = useState(false);
+
   const [isMessageDrawerOpen, setIsMessageDrawerOpen] = useState(false);
 
-  const { messages, sendMessage } = useMessages({ 
-    currentUser: 'auth stuff or any thing else',
-    room: 'video-call-room' 
+  const [rtcOffers, setRTCOffers] = useState<Array<Room>>([]);
+
+  const { messages, sendMessage } = useMessages({
+    currentUser: user,
+    room: 'video-call-room'
   });
 
   const mainVideoRef = useRef<HTMLVideoElement>(null!);
-  const cameraVideoRef = useRef<HTMLVideoElement>(null!);
   const mainStreamRef = useRef<MediaStream | null>(null);
+
+  const cameraVideoRef = useRef<HTMLVideoElement>(null!);
   const secondaryStreamRef = useRef<MediaStream | null>(null);
+
+  const popupStreamRef = useRef<MediaStream | null>(null);
+  const popupVideoRef = useRef<HTMLVideoElement>(null!);
+
   const recordings = useRef<Blob[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
 
@@ -125,7 +162,7 @@ const Basics = () => {
       setVideoFrameRateConstraints(mediaStream.getVideoTracks()[0].getCapabilities().frameRate as unknown as { max: number, min: number })
 
       // Clear any existing streams
-      
+
       // Add camera tracks to appropriate stream based on screen share state
       if (!isScreenSharing) {
         // Camera goes to main stream
@@ -315,12 +352,6 @@ const Basics = () => {
     switchVideoInput(deviceId);
   }, [switchVideoInput]);
 
-  useEffect(() => {
-    return () => {
-      stopAndClearStream(mainStreamRef);
-      stopAndClearStream(secondaryStreamRef);
-    };
-  }, [stopAndClearStream]);
 
   const handleToggleMessageDrawer = useCallback(() => {
     setIsMessageDrawerOpen(!isMessageDrawerOpen);
@@ -330,19 +361,181 @@ const Basics = () => {
     sendMessage(message);
   }, [sendMessage]);
 
+  const startCall = useCallback(async () => {
+    // starter peer
+    const mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        deviceId: selectedVideoDeviceId ? { exact: selectedVideoDeviceId } : undefined,
+      },
+      audio: {
+        deviceId: selectedAudioDeviceId ? { exact: selectedAudioDeviceId } : undefined,
+      },
+    });
+
+    addTracksToStream(popupStreamRef, mediaStream.getTracks());
+    updateVideoElement(popupVideoRef, popupStreamRef.current);
+    setIsVideoPopupOpen(true);
+
+    const peerConnection = new RTCPeerConnection(peerConfiguration);
+    popupStreamRef.current!
+      .getTracks()
+      .forEach(track => peerConnection.addTrack(track, popupStreamRef.current!));
+
+    // setup remote stream
+    mainStreamRef.current = new MediaStream();
+    updateVideoElement(mainVideoRef, mainStreamRef.current);
+
+
+    const offer = await peerConnection.createOffer();
+    peerConnection.setLocalDescription(offer);
+
+    // peer listenings 
+    peerConnection.addEventListener("signalingstatechange", (event) => {
+      console.log('signalingstatechange', event);
+      console.log('signalingstatechange', peerConnection.signalingState)
+    });
+
+    peerConnection.addEventListener('icecandidate', e => {
+      if (e.candidate) {
+        socketClient.emit('cts-ice-candidate', {
+          ICECandidate: e.candidate,
+          username: user,
+          isOfferer: true,
+        })
+      }
+    })
+
+    peerConnection.addEventListener('track', e => {
+      e.streams[0].getTracks().forEach(track => {
+        mainStreamRef.current!.addTrack(track);
+      })
+    })
+
+    socketClient.on('stc-ice-candidate', (data) => {
+      const {
+        ICECandidate,
+        username,
+        isOfferer,
+      } = data;
+
+      if (username === user || isOfferer) return;
+
+      peerConnection.addIceCandidate(ICECandidate);
+    });
+
+    socketClient.on('stc-answer-to-offerer', (data) => {
+      const { updatedOffer } = data;
+      peerConnection.setRemoteDescription(updatedOffer.answer);
+    });
+
+    socketClient.emit('cts-new-offer', { offer, user });
+
+  }, [
+    addTracksToStream,
+    selectedVideoDeviceId,
+    selectedAudioDeviceId,
+  ]);
+
+  const answerCall = useCallback(async (room: Room) => {
+    const { offer } = room;
+
+    const peerConnection = new RTCPeerConnection(peerConfiguration);
+    peerConnection.setRemoteDescription(offer);
+
+    // set main for other user
+    mainStreamRef.current = new MediaStream();
+    updateVideoElement(mainVideoRef, mainStreamRef.current);
+    peerConnection.addEventListener('track', e => {
+      e.streams[0].getTracks().forEach(track => {
+        mainStreamRef.current!.addTrack(track);
+      })
+    })
+
+    peerConnection.addEventListener("signalingstatechange", (event) => {
+      console.log('signalingstatechange', event);
+      console.log('signalingstatechange', peerConnection.signalingState)
+    });
+
+    peerConnection.addEventListener('icecandidate', e => {
+      if (e.candidate) {
+        socketClient.emit('cts-ice-candidate', {
+          ICECandidate: e.candidate,
+          username: user,
+          isOfferer: false,
+        })
+      }
+    })
+
+    socketClient.on('stc-ice-candidate', (data) => {
+      const {
+        ICECandidate,
+        username,
+      } = data;
+
+      if (username === user) return;
+
+      peerConnection.addIceCandidate(ICECandidate);
+    });
+
+    const mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        deviceId: selectedVideoDeviceId ? { exact: selectedVideoDeviceId } : undefined,
+      },
+      audio: {
+        deviceId: selectedAudioDeviceId ? { exact: selectedAudioDeviceId } : undefined,
+      },
+    });
+
+    mediaStream.getTracks().forEach(track => peerConnection.addTrack(track, mediaStream));
+
+    popupStreamRef.current = new MediaStream();
+    addTracksToStream(popupStreamRef, mediaStream.getTracks());
+    updateVideoElement(popupVideoRef, popupStreamRef.current);
+    setIsVideoPopupOpen(true);
+
+
+
+    const answer = await peerConnection.createAnswer();
+
+    room.answer = answer;
+    peerConnection.setLocalDescription(answer);
+
+    const { offererICECandidates } = await socketClient.emitWithAck('cts-answer-offer', { room });
+
+    offererICECandidates.forEach((candidate: RTCIceCandidate) => {
+      peerConnection.addIceCandidate(candidate);
+    });
+
+  }, [
+    addTracksToStream,
+    selectedAudioDeviceId,
+    selectedVideoDeviceId
+  ]);
+
   useEffect(() => {
-    socketClient.connect();
-    socketClient.on('connect', (...args) => {
-      console.log('args', args);
-      console.log('connected to socket');
+    return () => {
+      stopAndClearStream(mainStreamRef);
+      stopAndClearStream(secondaryStreamRef);
+      stopAndClearStream(popupStreamRef);
+    };
+  }, [stopAndClearStream]);
+
+  useEffect(() => {
+    socketClient.on('stc-new-offer', (data) => {
+      const { offer: { offererUserId } } = data;
+      if (offererUserId === user) return;
+
+      const { offer } = data;
+      setRTCOffers(prev => {
+        return [...prev, offer];
+      });
     });
 
 
     return () => {
-      socketClient.disconnect();
+      socketClient.off('stc-new-offer');
     };
   }, []);
-
 
   return (
     <Box sx={{
@@ -351,7 +544,38 @@ const Basics = () => {
       flexDirection: 'column',
       backgroundColor: '#1a1a1a'
     }}>
-
+      <Button
+        onClick={startCall}
+        variant='contained'
+        sx={{
+          width: '200px',
+          position: 'fixed',
+          top: 100,
+          left: '60px',
+          zIndex: 1000
+        }}
+      >
+        Start Call
+      </Button>
+      <Box
+        sx={{
+          position: 'fixed',
+          top: 100,
+          left: '260px',
+          zIndex: 1000
+        }}
+      >
+        {
+          rtcOffers
+            .map((offer) => (
+              <Box
+                key={offer.offererUserId}
+              >
+                <Button onClick={() => answerCall(offer)}>Answer Call {offer.offererUserId}</Button>
+              </Box>
+            ))
+        }
+      </Box>
       <Box sx={{
         flex: 1,
         display: 'flex',
@@ -381,7 +605,8 @@ const Basics = () => {
               borderRadius: '12px',
               transform: !isScreenSharing ? 'scaleX(-1)' : 'scaleX(1)' // Mirror camera, not screen share
             }}
-            muted={isScreenSharing} // Only mute for screen share
+            //muted={isScreenSharing} // Only mute for screen share
+            muted={true}
           />
 
           <Box sx={{
@@ -487,6 +712,14 @@ const Basics = () => {
         onClose={() => (false)}
         title="Camera"
       />
+      {
+        <DraggableVideoPopup
+          videoRef={popupVideoRef}
+          isVisible={isVideoPopupOpen}
+          onClose={() => setIsVideoPopupOpen(false)}
+          title="Remote User"
+        />
+      }
 
       {/* Message Drawer */}
       <MessageDrawer

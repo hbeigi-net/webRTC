@@ -111,7 +111,9 @@ export const useMessages = ({ currentUser, room = 'default' }: UseMessagesProps)
     socketClient.on('message', handleMessage);
     socketClient.on('userJoined', handleUserJoined);
     socketClient.on('userLeft', handleUserLeft);
-
+    socketClient.on('error', err => {
+      alert("error: " + err)
+    })
     if (!socketClient.connected) {
       socketClient.connect();
     }
@@ -121,7 +123,7 @@ export const useMessages = ({ currentUser, room = 'default' }: UseMessagesProps)
       socketClient.off('disconnect', handleDisconnect);
       socketClient.off('message', handleMessage);
       socketClient.off('userJoined', handleUserJoined);
-      socketClient.off('userLeft', handleUserLeft);
+      socketClient.off('userLeft', handleUserLeft);;
     };
   }, [currentUser, room, joinRoom]);
 
