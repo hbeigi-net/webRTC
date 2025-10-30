@@ -55,7 +55,6 @@ export interface ChatMessage {
 export interface MessageDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  messages: ChatMessage[];
-  onSendMessage: (message: string) => void;
   currentUser: string;
+  room?: string;
 }

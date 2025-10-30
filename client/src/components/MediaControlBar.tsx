@@ -3,16 +3,12 @@ import {
   Button,
   Menu,
   MenuItem,
-  IconButton,
-  Typography,
   Modal,
   Paper,
 } from '@mui/material';
 import { useState } from 'react';
 import MediaDeviceSettings from './MediaDeviceSettings';
-import VideoQualitySettings from './VideoQualitySettings';
 import ScreenShareSettings from './ScreenShareSettings';
-import RecordingControls from './RecordingControls';
 
 interface MediaControlBarProps {
   // Media Device Settings
@@ -28,11 +24,6 @@ interface MediaControlBarProps {
   refreshDevices: () => void;
   startGettingMedia: () => void;
 
-  // Video Quality Settings
-  videoRefreshRate: number;
-  videoFrameRateConstraints: { min: number; max: number };
-  handleFrameRateChange: (event: unknown, newValue: number) => void;
-
   // Screen Share Settings
   isScreenSharing: boolean;
   screenShareAudio: boolean;
@@ -44,10 +35,6 @@ interface MediaControlBarProps {
   onWidthChange: (width: number) => void;
   onHeightChange: (height: number) => void;
 
-  // Recording Controls
-  onStartRecording: () => void;
-  onStopRecording: () => void;
-  onPreviewRecordings: () => void;
 }
 
 const MediaControlBar = ({
@@ -64,11 +51,6 @@ const MediaControlBar = ({
   refreshDevices,
   startGettingMedia,
 
-  // Video Quality Settings
-  videoRefreshRate,
-  videoFrameRateConstraints,
-  handleFrameRateChange,
-
   // Screen Share Settings
   isScreenSharing,
   screenShareAudio,
@@ -80,10 +62,6 @@ const MediaControlBar = ({
   onWidthChange,
   onHeightChange,
 
-  // Recording Controls
-  onStartRecording,
-  onStopRecording,
-  onPreviewRecordings,
 }: MediaControlBarProps) => {
   const [settingsMenuAnchor, setSettingsMenuAnchor] = useState<null | HTMLElement>(null);
   const [modalOpen, setModalOpen] = useState<string | null>(null);
@@ -121,7 +99,6 @@ const MediaControlBar = ({
           backdropFilter: 'blur(10px)',
         }}
       >
-        {/* Main Controls */}
         <Button
           variant="contained"
           color="primary"
@@ -139,17 +116,6 @@ const MediaControlBar = ({
         >
           {isScreenSharing ? 'Stop Share' : 'Share Screen'}
         </Button>
-
-        <Button
-          variant="outlined"
-          color="success"
-          onClick={onStartRecording}
-          startIcon="🔴"
-        >
-          Record
-        </Button>
-
-        {/* Settings Dropdown */}
         <Button
           variant="outlined"
           onClick={handleSettingsClick}
@@ -158,8 +124,6 @@ const MediaControlBar = ({
           Settings
         </Button>
       </Box>
-
-      {/* Settings Menu */}
       <Menu
         anchorEl={settingsMenuAnchor}
         open={Boolean(settingsMenuAnchor)}
@@ -187,7 +151,6 @@ const MediaControlBar = ({
         </MenuItem>
       </Menu>
 
-      {/* Settings Modals */}
       <Modal
         open={modalOpen === 'devices'}
         onClose={handleModalClose}
@@ -213,25 +176,6 @@ const MediaControlBar = ({
           />
         </Paper>
       </Modal>
-
-      <Modal
-        open={modalOpen === 'quality'}
-        onClose={handleModalClose}
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Paper sx={{ maxWidth: 500, maxHeight: '80vh', overflow: 'auto' }}>
-          <VideoQualitySettings
-            videoRefreshRate={videoRefreshRate}
-            videoFrameRateConstraints={videoFrameRateConstraints}
-            handleFrameRateChange={handleFrameRateChange}
-          />
-        </Paper>
-      </Modal>
-
       <Modal
         open={modalOpen === 'screen'}
         onClose={handleModalClose}
@@ -256,25 +200,47 @@ const MediaControlBar = ({
         </Paper>
       </Modal>
 
-      <Modal
-        open={modalOpen === 'recording'}
-        onClose={handleModalClose}
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        <Paper sx={{ maxWidth: 500, maxHeight: '80vh', overflow: 'auto' }}>
-          <RecordingControls
-            onStartRecording={onStartRecording}
-            onStopRecording={onStopRecording}
-            onPreviewRecordings={onPreviewRecordings}
-          />
-        </Paper>
-      </Modal>
     </>
   );
 };
 
 export default MediaControlBar;
+
+
+//// recordings commented
+//<Modal
+//  open={modalOpen === 'recording'}
+//  onClose={handleModalClose}
+//  sx={{
+//    display: 'flex',
+//    alignItems: 'center',
+//    justifyContent: 'center',
+//  }}
+//>
+//  <Paper sx={{ maxWidth: 500, maxHeight: '80vh', overflow: 'auto' }}>
+//    <RecordingControls
+//      onStartRecording={onStartRecording}
+//      onStopRecording={onStopRecording}
+//      onPreviewRecordings={onPreviewRecordings}
+//    />
+//  </Paper>
+//</Modal>
+
+// frame rate settings commented
+//  <Modal
+//  open={modalOpen === 'quality'}
+//  onClose={handleModalClose}
+//  sx={{
+//    display: 'flex',
+//    alignItems: 'center',
+//    justifyContent: 'center',
+//  }}
+//>
+//  <Paper sx={{ maxWidth: 500, maxHeight: '80vh', overflow: 'auto' }}>
+//    <VideoQualitySettings
+//      videoRefreshRate={videoRefreshRate}
+//      videoFrameRateConstraints={videoFrameRateConstraints}
+//      handleFrameRateChange={handleFrameRateChange}
+//    />
+//  </Paper>
+//</Modal>

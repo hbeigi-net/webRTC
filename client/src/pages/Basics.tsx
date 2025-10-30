@@ -7,10 +7,8 @@ import {
 } from '@mui/material';
 import { Chat as ChatIcon } from '@mui/icons-material';
 import { useRef, useState, useCallback, useEffect } from 'react';
-import type { RefObject } from 'react';
 import { useMediaDevices } from '../hooks/useMediaDevices';
 import { useScreenShare } from '../hooks/useScreenShare';
-import { useMessages } from '../hooks/useMessages';
 import MediaControlBar from '../components/MediaControlBar';
 import DraggableVideoPopup from '../components/DraggableVideoPopup';
 import DeviceStatus from '../components/DeviceStatus';
@@ -32,27 +30,32 @@ const peerConfiguration = {
   ]
 }
 
-const updateVideoElement = (videoRef: React.RefObject<HTMLVideoElement>, stream: MediaStream | null) => {
-  if (videoRef.current) {
-    videoRef.current.srcObject = stream;
-    if (stream) {
-      // Programmatically play the video
-      videoRef.current.play().catch(err => {
-        console.log('Error playing video:', err);
-      });
-    }
+const updateVideoElement = (videoElement: HTMLVideoElement | null, stream: MediaStream | null) => {
+  if (!videoElement) {
+    console.error('Video element not found');
+    return;
+  }
+  
+  videoElement.srcObject = stream;
+  if (stream) {
+    videoElement.play()
+    .catch(err => console.error('Error playing video:', err));
   }
 }
 
-const removeTracksFromStream = (streamRef: RefObject<MediaStream | null>, tracks: MediaStreamTrack[]) => {
-  if (streamRef.current) {
-    tracks.forEach(track => {
-      streamRef.current!.removeTrack(track);
-      track.stop();
-    });
-  }
-}
+const clearStream = (stream: MediaStream | null) => {
+  if (!stream) return;
 
+  stream.getTracks().forEach(track => {
+    stream.removeTrack(track);
+    track.stop();
+  });
+};
+
+const addTracksToStream = (stream: MediaStream | null, tracks: MediaStreamTrack[]) => {
+  if (!stream) return;
+  tracks.forEach(track => stream.addTrack(track));
+}
 
 type Room = {
   offererUserId: string;
@@ -65,12 +68,6 @@ type Room = {
 
 
 const Basics = () => {
-  const [videoFrameRateConstraints, setVideoFrameRateConstraints] = useState({ min: 0, max: 30 })
-  const [videoRefreshRate, setVideoRefreshRate] = useState(() => {
-    const supportedConstrains = navigator.mediaDevices.getSupportedConstraints();
-    if (supportedConstrains.frameRate) return 30;
-    return 30;
-  })
   const [screenShareAudio, setScreenShareAudio] = useState(false)
   const [screenShareWidth, setScreenShareWidth] = useState(1000)
   const [screenShareHeight, setScreenShareHeight] = useState(600)
@@ -85,10 +82,6 @@ const Basics = () => {
 
   const [rtcOffers, setRTCOffers] = useState<Array<Room>>([]);
 
-  const { messages, sendMessage } = useMessages({
-    currentUser: user,
-    room: 'video-call-room'
-  });
 
   const mainVideoRef = useRef<HTMLVideoElement>(null!);
   const mainStreamRef = useRef<MediaStream | null>(null);
@@ -98,9 +91,6 @@ const Basics = () => {
 
   const popupStreamRef = useRef<MediaStream | null>(null);
   const popupVideoRef = useRef<HTMLVideoElement>(null!);
-
-  const recordings = useRef<Blob[]>([]);
-  const recorderRef = useRef<MediaRecorder | null>(null);
 
   const {
     audioInputDevices,
@@ -122,31 +112,6 @@ const Basics = () => {
     error: screenShareError,
   } = useScreenShare();
 
-  const createStreamFromTracks = useCallback((tracks: MediaStreamTrack[]): MediaStream => {
-    return new MediaStream(tracks);
-  }, []);
-
-  const stopAndClearStream = useCallback((streamRef: RefObject<MediaStream | null>) => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-  }, []);
-
-  const clearStream = useCallback((streamRef: RefObject<MediaStream | null>) => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => streamRef.current!.removeTrack(track));
-    }
-  }, []);
-
-  const addTracksToStream = useCallback((streamRef: RefObject<MediaStream | null>, tracks: MediaStreamTrack[]) => {
-    if (!streamRef.current) {
-      streamRef.current = createStreamFromTracks(tracks);
-    } else {
-      tracks.forEach(track => streamRef.current!.addTrack(track));
-    }
-  }, [createStreamFromTracks]);
-
   const startGettingMedia = useCallback(async (constraints?: MediaStreamConstraints) => {
     try {
       const mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -159,82 +124,36 @@ const Basics = () => {
         ...(constraints || {})
       });
 
-      setVideoFrameRateConstraints(mediaStream.getVideoTracks()[0].getCapabilities().frameRate as unknown as { max: number, min: number })
+      
 
-      // Clear any existing streams
-
-      // Add camera tracks to appropriate stream based on screen share state
       if (!isScreenSharing) {
         // Camera goes to main stream
-        clearStream(mainStreamRef);
-        clearStream(secondaryStreamRef);
-        addTracksToStream(mainStreamRef, mediaStream.getTracks());
-        updateVideoElement(mainVideoRef, mainStreamRef.current);
+        clearStream(mainStreamRef.current);
+        clearStream(secondaryStreamRef.current);
+        addTracksToStream(mainStreamRef.current, mediaStream.getTracks());
+        updateVideoElement(mainVideoRef.current, mainStreamRef.current);
       } else {
         // Camera goes to secondary stream (popup)
-        clearStream(secondaryStreamRef);
-        addTracksToStream(secondaryStreamRef, mediaStream.getTracks());
-        updateVideoElement(cameraVideoRef, secondaryStreamRef.current);
+        clearStream(secondaryStreamRef.current);
+        addTracksToStream(secondaryStreamRef.current, mediaStream.getTracks());
+        updateVideoElement(cameraVideoRef.current, secondaryStreamRef.current);
       }
       setIsCameraSharing(true);
     } catch (err) {
       console.log('error startGettingMedia', err)
     }
-  }, [selectedVideoDeviceId, selectedAudioDeviceId, isScreenSharing, clearStream, addTracksToStream])
-
-  const handleFrameRateChage = useCallback(async (_e: unknown, newValue: number) => {
-    setVideoRefreshRate(newValue);
-
-    try {
-      if (mainStreamRef.current) {
-        const videoTracks = mainStreamRef.current.getVideoTracks();
-        removeTracksFromStream(mainStreamRef, videoTracks);
-      }
-      if (secondaryStreamRef.current) {
-        const videoTracks = secondaryStreamRef.current.getVideoTracks();
-        removeTracksFromStream(secondaryStreamRef, videoTracks);
-      }
-
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          deviceId: selectedVideoDeviceId ? { exact: selectedVideoDeviceId } : undefined,
-          frameRate: newValue,
-          aspectRatio: 1,
-          width: 300,
-          height: 300,
-          backgroundBlur: true,
-          sampleRate: 10,
-          displaySurface: '0lklkjjlk;'
-        },
-      });
-
-      // Add new camera tracks to appropriate stream based on screen share state
-      if (!isScreenSharing) {
-        // Camera goes to main stream
-        addTracksToStream(mainStreamRef, newStream.getTracks());
-        updateVideoElement(mainVideoRef, mainStreamRef.current);
-      } else {
-        // Camera goes to secondary stream (popup)
-        addTracksToStream(secondaryStreamRef, newStream.getTracks());
-        updateVideoElement(cameraVideoRef, secondaryStreamRef.current);
-      }
-    } catch (err) {
-      console.log('error switchVideoInput', err)
-    }
-  }, [selectedVideoDeviceId, isScreenSharing, addTracksToStream])
+  }, [selectedVideoDeviceId, selectedAudioDeviceId, isScreenSharing])
 
   const shareScreen = useCallback(async () => {
-
     if (isScreenSharing) {
       stopScreenShare();
-      clearStream(mainStreamRef);
+      clearStream(mainStreamRef.current);
       if (isCameraSharing && secondaryStreamRef.current) {
         const mediaTracks = secondaryStreamRef.current.getTracks();
-        //stopAndClearStream(secondaryStreamRef);
         secondaryStreamRef.current.getTracks().forEach(tr => secondaryStreamRef.current!.removeTrack(tr));
-        addTracksToStream(mainStreamRef, mediaTracks);
-        updateVideoElement(mainVideoRef, mainStreamRef.current);
-        updateVideoElement(cameraVideoRef, null);
+        addTracksToStream(mainStreamRef.current, mediaTracks);
+        updateVideoElement(mainVideoRef.current, mainStreamRef.current);
+        updateVideoElement(cameraVideoRef.current, null);
       }
 
       return;
@@ -253,64 +172,28 @@ const Basics = () => {
         // If camera is currently in main stream, move it to secondary
         if (isCameraSharing && mainStreamRef.current) {
           const mediaTracks = mainStreamRef.current.getTracks();
-          clearStream(secondaryStreamRef);
-          clearStream(mainStreamRef);
-          addTracksToStream(secondaryStreamRef, mediaTracks);
-          updateVideoElement(cameraVideoRef, secondaryStreamRef.current);
+          clearStream(secondaryStreamRef.current);
+          clearStream(mainStreamRef.current);
+          addTracksToStream(secondaryStreamRef.current, mediaTracks);
+          updateVideoElement(cameraVideoRef.current, secondaryStreamRef.current);
         }
 
         // Add screen share tracks to main stream
-        addTracksToStream(mainStreamRef, stream.getTracks());
-        updateVideoElement(mainVideoRef, mainStreamRef.current);
+        addTracksToStream(mainStreamRef.current, stream.getTracks());
+        updateVideoElement(mainVideoRef.current, mainStreamRef.current);
       }
     } catch (err) {
       console.error('Error in shareScreen:', err);
     }
   }, [
-    isScreenSharing,
-    clearStream,
     stopScreenShare,
-    isCameraSharing,
     startScreenShare,
+    isScreenSharing,
+    isCameraSharing,
     screenShareAudio,
     screenShareWidth,
     screenShareHeight,
-    addTracksToStream
   ])
-
-  const startRecording = useCallback(() => {
-    if (!isScreenSharing) return;
-
-    const activeStream = mainStreamRef.current;
-    if (activeStream && !recorderRef.current) {
-      recorderRef.current = new MediaRecorder(activeStream);
-    }
-
-    const recorder = recorderRef.current;
-    if (recorder) {
-      recorder.ondataavailable = e => {
-        recordings.current.push(e.data)
-      }
-      recorder.start();
-    }
-  }, [isScreenSharing])
-
-  const stopRecording = useCallback(() => {
-    const recorder = recorderRef.current;
-
-    recorder?.stop();
-  }, [])
-
-  const previewRecordings = useCallback(() => {
-    const previewBlob = new Blob(recordings.current);
-
-    if (mainVideoRef.current) {
-      mainVideoRef.current.srcObject = null;
-      mainVideoRef.current.src = URL.createObjectURL(previewBlob);
-      mainVideoRef.current.controls = true;
-      mainVideoRef.current.play();
-    }
-  }, [])
 
   const handleMuteToggle = useCallback(() => {
     setIsMuted(!isMuted);
@@ -352,14 +235,9 @@ const Basics = () => {
     switchVideoInput(deviceId);
   }, [switchVideoInput]);
 
-
   const handleToggleMessageDrawer = useCallback(() => {
     setIsMessageDrawerOpen(!isMessageDrawerOpen);
   }, [isMessageDrawerOpen]);
-
-  const handleSendMessage = useCallback((message: string) => {
-    sendMessage(message);
-  }, [sendMessage]);
 
   const startCall = useCallback(async () => {
     // starter peer
@@ -372,8 +250,8 @@ const Basics = () => {
       },
     });
 
-    addTracksToStream(popupStreamRef, mediaStream.getTracks());
-    updateVideoElement(popupVideoRef, popupStreamRef.current);
+    addTracksToStream(popupStreamRef.current, mediaStream.getTracks());
+    updateVideoElement(popupVideoRef.current, popupStreamRef.current);
     setIsVideoPopupOpen(true);
 
     const peerConnection = new RTCPeerConnection(peerConfiguration);
@@ -383,7 +261,7 @@ const Basics = () => {
 
     // setup remote stream
     mainStreamRef.current = new MediaStream();
-    updateVideoElement(mainVideoRef, mainStreamRef.current);
+    updateVideoElement(mainVideoRef.current, mainStreamRef.current);
 
 
     const offer = await peerConnection.createOffer();
@@ -431,7 +309,6 @@ const Basics = () => {
     socketClient.emit('cts-new-offer', { offer, user });
 
   }, [
-    addTracksToStream,
     selectedVideoDeviceId,
     selectedAudioDeviceId,
   ]);
@@ -442,9 +319,8 @@ const Basics = () => {
     const peerConnection = new RTCPeerConnection(peerConfiguration);
     peerConnection.setRemoteDescription(offer);
 
-    // set main for other user
     mainStreamRef.current = new MediaStream();
-    updateVideoElement(mainVideoRef, mainStreamRef.current);
+    updateVideoElement(mainVideoRef.current, mainStreamRef.current);
     peerConnection.addEventListener('track', e => {
       e.streams[0].getTracks().forEach(track => {
         mainStreamRef.current!.addTrack(track);
@@ -489,11 +365,9 @@ const Basics = () => {
     mediaStream.getTracks().forEach(track => peerConnection.addTrack(track, mediaStream));
 
     popupStreamRef.current = new MediaStream();
-    addTracksToStream(popupStreamRef, mediaStream.getTracks());
-    updateVideoElement(popupVideoRef, popupStreamRef.current);
+    addTracksToStream(popupStreamRef.current, mediaStream.getTracks());
+    updateVideoElement(popupVideoRef.current, popupStreamRef.current);
     setIsVideoPopupOpen(true);
-
-
 
     const answer = await peerConnection.createAnswer();
 
@@ -507,18 +381,18 @@ const Basics = () => {
     });
 
   }, [
-    addTracksToStream,
     selectedAudioDeviceId,
     selectedVideoDeviceId
   ]);
 
   useEffect(() => {
     return () => {
-      stopAndClearStream(mainStreamRef);
-      stopAndClearStream(secondaryStreamRef);
-      stopAndClearStream(popupStreamRef);
+      clearStream(mainStreamRef.current);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      clearStream(secondaryStreamRef.current);
+      clearStream(popupStreamRef.current);
     };
-  }, [stopAndClearStream]);
+  }, []);
 
   useEffect(() => {
     socketClient.on('stc-new-offer', (data) => {
@@ -684,11 +558,6 @@ const Basics = () => {
         refreshDevices={refreshDevices}
         startGettingMedia={startGettingMedia}
 
-        // Video Quality Settings
-        videoRefreshRate={videoRefreshRate}
-        videoFrameRateConstraints={videoFrameRateConstraints}
-        handleFrameRateChange={handleFrameRateChage}
-
         // Screen Share Settings
         isScreenSharing={isScreenSharing}
         screenShareAudio={screenShareAudio}
@@ -699,11 +568,6 @@ const Basics = () => {
         onAudioToggle={setScreenShareAudio}
         onWidthChange={setScreenShareWidth}
         onHeightChange={setScreenShareHeight}
-
-        // Recording Controls
-        onStartRecording={startRecording}
-        onStopRecording={stopRecording}
-        onPreviewRecordings={previewRecordings}
       />
 
       <DraggableVideoPopup
@@ -720,17 +584,101 @@ const Basics = () => {
           title="Remote User"
         />
       }
-
-      {/* Message Drawer */}
       <MessageDrawer
         isOpen={isMessageDrawerOpen}
         onClose={() => setIsMessageDrawerOpen(false)}
-        messages={messages}
-        onSendMessage={handleSendMessage}
-        currentUser="You"
+        currentUser={user}
+        room="video-call-room"
       />
     </Box>
   );
 };
 
 export default Basics;
+
+
+// recordings commented
+//const recordings = useRef<Blob[]>([]);
+//const recorderRef = useRef<MediaRecorder | null>(null);
+//const startRecording = useCallback(() => {
+//  if (!isScreenSharing) return;
+
+//  const activeStream = mainStreamRef.current;
+//  if (activeStream && !recorderRef.current) {
+//    recorderRef.current = new MediaRecorder(activeStream);
+//  }
+
+//  const recorder = recorderRef.current;
+//  if (recorder) {
+//    recorder.ondataavailable = e => {
+//      recordings.current.push(e.data)
+//    }
+//    recorder.start();
+//  }
+//}, [isScreenSharing])
+
+
+//const stopRecording = useCallback(() => {
+//  const recorder = recorderRef.current;
+
+//  recorder?.stop();
+//}, [])
+//const previewRecordings = useCallback(() => {
+//  const previewBlob = new Blob(recordings.current);
+
+//  if (mainVideoRef.current) {
+//    mainVideoRef.current.srcObject = null;
+//    mainVideoRef.current.src = URL.createObjectURL(previewBlob);
+//    mainVideoRef.current.controls = true;
+//    mainVideoRef.current.play();
+//  }
+//}, [])
+
+// frame rate change commented
+//const handleFrameRateChage = useCallback(async (_e: unknown, newValue: number) => {
+//  setVideoRefreshRate(newValue);
+
+//  try {
+//    if (mainStreamRef.current) {
+//      const videoTracks = mainStreamRef.current.getVideoTracks();
+//      removeTracksFromStream(mainStreamRef, videoTracks);
+//    }
+//    if (secondaryStreamRef.current) {
+//      const videoTracks = secondaryStreamRef.current.getVideoTracks();
+//      removeTracksFromStream(secondaryStreamRef, videoTracks);
+//    }
+
+//    const newStream = await navigator.mediaDevices.getUserMedia({
+//      video: {
+//        deviceId: selectedVideoDeviceId ? { exact: selectedVideoDeviceId } : undefined,
+//        frameRate: newValue,
+//        aspectRatio: 1,
+//        width: 300,
+//        height: 300,
+//        backgroundBlur: true,
+//        sampleRate: 10,
+//        displaySurface: '0lklkjjlk;'
+//      },
+//    });
+
+//    // Add new camera tracks to appropriate stream based on screen share state
+//    if (!isScreenSharing) {
+//      // Camera goes to main stream
+//      addTracksToStream(mainStreamRef, newStream.getTracks());
+//      updateVideoElement(mainVideoRef, mainStreamRef.current);
+//    } else {
+//      // Camera goes to secondary stream (popup)
+//      addTracksToStream(secondaryStreamRef, newStream.getTracks());
+//      updateVideoElement(cameraVideoRef, secondaryStreamRef.current);
+//    }
+//  } catch (err) {
+//    console.log('error switchVideoInput', err)
+//  }
+//}, [selectedVideoDeviceId, isScreenSharing, addTracksToStream])
+
+//const [videoRefreshRate, setVideoRefreshRate] = useState(() => {
+//  const supportedConstrains = navigator.mediaDevices.getSupportedConstraints();
+//  if (supportedConstrains.frameRate) return 30;
+//  return 30;
+//})
+//setVideoFrameRateConstraints(mediaStream.getVideoTracks()[0].getCapabilities().frameRate as unknown as { max: number, min: number })

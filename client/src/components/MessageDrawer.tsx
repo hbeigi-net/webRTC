@@ -7,7 +7,6 @@ import {
   IconButton,
   List,
   ListItem,
-  ListItemText,
   Avatar,
   Paper,
   Divider,
@@ -18,15 +17,16 @@ import {
   Close as CloseIcon,
   Chat as ChatIcon,
 } from '@mui/icons-material';
-import { MessageDrawerProps, ChatMessage } from '../types';
+import type { MessageDrawerProps } from '../types';
+import { useMessages } from '../hooks/useMessages';
 
 const MessageDrawer: React.FC<MessageDrawerProps> = ({
   isOpen,
   onClose,
-  messages,
-  onSendMessage,
   currentUser,
+  room,
 }) => {
+  const { messages, sendMessage } = useMessages({ currentUser, room });
   const [messageText, setMessageText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -45,7 +45,7 @@ const MessageDrawer: React.FC<MessageDrawerProps> = ({
 
   const handleSendMessage = () => {
     if (messageText.trim()) {
-      onSendMessage(messageText.trim());
+      sendMessage(messageText.trim());
       setMessageText('');
     }
   };

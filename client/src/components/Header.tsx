@@ -2,7 +2,6 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   AppBar,
   Toolbar,
-  Typography,
   Button,
   Box,
   Container,
@@ -36,31 +35,12 @@ const Header = () => {
 
   const navigationItems = [
     { label: 'Home', path: '/' },
-    { label: 'About', path: '/about' },
-    { label: 'Contact', path: '/contact' },
-    { label: 'Basics', path: '/basics' },
-    { label: 'Video Call', path: '/video-call' },
   ];
 
   return (
     <AppBar position="sticky" elevation={1}>
       <Container maxWidth="lg">
         <Toolbar sx={{ justifyContent: 'space-between' }}>
-          <Typography
-            component={Link}
-            to="/"
-            variant="h6"
-            sx={{
-              fontWeight: 'bold',
-              color: 'inherit',
-              textDecoration: 'none',
-              '&:hover': {
-                color: 'primary.light',
-              },
-            }}
-          >
-            WebRTC Playground
-          </Typography>
 
           {isMobile ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
