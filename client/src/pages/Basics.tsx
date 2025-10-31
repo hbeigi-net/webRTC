@@ -249,7 +249,8 @@ const Basics = () => {
         deviceId: selectedAudioDeviceId ? { exact: selectedAudioDeviceId } : undefined,
       },
     });
-
+    
+    popupStreamRef.current = new MediaStream();
     addTracksToStream(popupStreamRef.current, mediaStream.getTracks());
     updateVideoElement(popupVideoRef.current, popupStreamRef.current);
     setIsVideoPopupOpen(true);
